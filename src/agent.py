@@ -5,6 +5,7 @@ from groq import RateLimitError
 from langchain.chains.conversation.memory import ConversationBufferMemory
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_groq import ChatGroq
+from utils import run_async_task, run_in_loop
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from dotenv import load_dotenv
@@ -21,7 +22,6 @@ class StockAssistanceAgent:
         self.max_retries = 1
         
         # Initialize MCP client with math and weather servers
-        print("API KEY: ",os.getenv("FIRECRAWL_API_KEY"))
         self.client = MultiServerMCPClient(
             {
                 "stock_tools": {
@@ -34,20 +34,7 @@ class StockAssistanceAgent:
                         "main.py"                
                     ],
                     "transport" : "stdio"
-                },
-                "firecrawl-mcp": {
-                    "command": "npx",
-                    "args": ["-y", "firecrawl-mcp"],
-                    "env": {
-                        "FIRECRAWL_API_KEY": os.getenv("FIRECRAWL_API_KEY")
-                    },
-                    "transport" : "stdio"
-                    }
-                # "weather": {
-                #     # make sure you start your weather server on port 8000
-                #     "url": "http://localhost:8000/mcp",
-                #     "transport": "streamable_http",
-                # }
+                }
             }
         )
         
@@ -179,10 +166,10 @@ class StockAssistanceAgent:
     #     except Exception as e:
     #         print(f"Error during cleanup: {e}")
 
-# Example usage
-if __name__ == "__main__":
+agent= StockAssistanceAgent()
+
+async def main():
     # Make sure to set your GROQ_API_KEY in your .env file   
-    agent= StockAssistanceAgent()
     print("Stock Assistant Agent initialized!")
     print(f"Available tools: {agent.get_available_tools()}")
     
@@ -197,10 +184,14 @@ if __name__ == "__main__":
     #     response1 = await agent.chat("What is the price of Infosys?")
     #     print(f"Agent: {response1}")
 
-    answer = asyncio.run(agent.chat("What is the price of Infosys?"))
-    print(answer)
+    answer = await agent.chat("What is the news of Infosys?")
+    print(str(answer))
     
     
     # Test portfolio calculation
     holdings = {"AAPL": 100, "GOOGL": 50, "MSFT": 75}
     prices = {"AAPL": 150.0, "GOOGL": 2500.0, "MSFT": 300.0}
+
+# Example usage
+if __name__ == "__main__":
+    asyncio.run(main())    
