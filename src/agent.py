@@ -5,7 +5,7 @@ from groq import RateLimitError
 from langchain.chains.conversation.memory import ConversationBufferMemory
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_groq import ChatGroq
-from utils import run_async_task, run_in_loop
+from src.utils import run_async_task, run_in_loop
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from dotenv import load_dotenv
@@ -34,17 +34,31 @@ class StockAssistanceAgent:
                         "main.py"                
                     ],
                     "transport" : "stdio"
-                }
+                },
+                "firecrawl-mcp": {
+                    "command": "npx",
+                    "args": ["-y", "firecrawl-mcp"],
+                    "env": {
+                        "FIRECRAWL_API_KEY": os.getenv("FIRECRAWL_API_KEY")
+                    },
+                    "transport" : "stdio"
+                    }
             }
         )
         
         # Get tools from MCP client
+        required_tools = [ "get_stock_quote", "get_stock_fundamentals", "get_stock_news", "get_stock_analysis", "firecrawl_scrape"]
         self.tools = asyncio.run(self.client.get_tools())
+
+        self.selected_tools = []
+        for tool in self.tools:
+            if tool.name in required_tools:
+                self.selected_tools.append(tool)
         
         # Initialize LLM
         self.llm = ChatGroq(
-            model_name="llama-3.3-70b-versatile",
-            temperature=0.7
+            model_name="qwen/qwen3-32b",
+            temperature=0.2
         )
         
         # Initialize memory
@@ -79,14 +93,14 @@ class StockAssistanceAgent:
         # Create the agent
         agent = create_tool_calling_agent(
             llm=self.llm,
-            tools=self.tools,
+            tools=self.selected_tools,
             prompt=prompt
         )
         
         # Create agent executor
         self.agent_executor = AgentExecutor(
             agent=agent,
-            tools=self.tools,
+            tools=self.selected_tools,
             memory=self.memory,
             verbose=True,
             handle_parsing_errors=True,
@@ -130,7 +144,7 @@ class StockAssistanceAgent:
         Returns:
             list: List of available tool names
         """
-        return [tool.name for tool in self.tools]
+        return [tool.name for tool in self.selected_tools]
     
     def clear_memory(self):
         """Clear the conversation memory"""
