@@ -5,7 +5,7 @@ from groq import RateLimitError
 from langchain.chains.conversation.memory import ConversationBufferMemory
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_groq import ChatGroq
-from src.utils import run_async_task, run_in_loop
+# from src.utils import run_async_task, run_in_loop
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from dotenv import load_dotenv
@@ -25,14 +25,8 @@ class StockAssistanceAgent:
         self.client = MultiServerMCPClient(
             {
                 "stock_tools": {
-                    "command": "uv",
-                    # Make sure to update to the full absolute path to your math_server.py file
-                    "args": [
-                        "--directory",
-                        "/home/nitheesh/Desktop/Stock_MCP",
-                        "run",
-                        "main.py"                
-                    ],
+                    "command": "python",
+                    "args": ["-m", "stock_mcp.server"],
                     "transport" : "stdio"
                 },
                 "firecrawl-mcp": {
@@ -198,7 +192,7 @@ async def main():
     #     response1 = await agent.chat("What is the price of Infosys?")
     #     print(f"Agent: {response1}")
 
-    answer = await agent.chat("What is the news of Infosys?")
+    answer = await agent.chat("What is the price of Infosys?")
     print(str(answer))
     
     
