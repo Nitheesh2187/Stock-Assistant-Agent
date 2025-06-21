@@ -174,9 +174,8 @@ class StockAssistanceAgent:
     #     except Exception as e:
     #         print(f"Error during cleanup: {e}")
 
-agent= StockAssistanceAgent()
-
-async def main():
+def main():
+    agent= StockAssistanceAgent()
     # Make sure to set your GROQ_API_KEY in your .env file   
     print("Stock Assistant Agent initialized!")
     print(f"Available tools: {agent.get_available_tools()}")
@@ -192,7 +191,7 @@ async def main():
     #     response1 = await agent.chat("What is the price of Infosys?")
     #     print(f"Agent: {response1}")
 
-    answer = await agent.chat("What is the price of Infosys?")
+    answer = asyncio.run(agent.chat("What is the price of Infosys?"))
     print(str(answer))
     
     
@@ -202,4 +201,4 @@ async def main():
 
 # Example usage
 if __name__ == "__main__":
-    asyncio.run(main())    
+    main()    

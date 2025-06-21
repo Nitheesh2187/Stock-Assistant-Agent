@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  app:
+    build: .
+    ports:
+      - "8051:8051"
+    volumes:
+      - .:/app
+      - /app/.venv  # Prevent overwriting the venv
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
+      - ALPHAVANTAGE_API_KEY=${ALPHAVANTAGE_API_KEY}
+    stdin_open: true
+    tty: true
