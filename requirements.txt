@@ -4,3 +4,14 @@ langchain-mcp-adapters>=0.1.7
 nest-asyncio>=1.6.0
 streamlit>=1.45.1
 groq==0.26.0
+
+# Backend (FastAPI)
+fastapi>=0.115.0
+uvicorn>=0.34.0
+aiosqlite>=0.21.0
+sqlalchemy[asyncio]>=2.0.0
+pydantic-settings>=2.7.0
+python-jose[cryptography]>=3.3.0
+bcrypt>=4.0.0
+httpx>=0.28.0
+email-validator>=2.0.0
