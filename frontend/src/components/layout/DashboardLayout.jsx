@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Sun, Moon } from 'lucide-react';
 import { useResizable } from '../../hooks/useResizable';
 
-export default function DashboardLayout({ sidebar, center, chat }) {
+export default function DashboardLayout({ sidebar, center, chat, dark, onToggleDark }) {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
 
@@ -45,13 +45,24 @@ export default function DashboardLayout({ sidebar, center, chat }) {
           className="relative flex-shrink-0 flex flex-col border-r border-blue-100 dark:border-surface-700 bg-blue-50 dark:bg-surface-900"
           style={{ width: leftResize.size }}
         >
-          <button
-            onClick={() => setLeftCollapsed(true)}
-            className="absolute top-2.5 right-2 z-20 p-1 rounded hover:bg-blue-100 dark:hover:bg-surface-800 text-surface-400 dark:text-surface-500 transition-colors"
-            title="Hide watchlist"
-          >
-            <PanelLeftClose size={14} />
-          </button>
+          <div className="absolute top-2.5 right-2 z-20 flex items-center gap-1">
+            {onToggleDark && (
+              <button
+                onClick={onToggleDark}
+                className="p-1 rounded hover:bg-blue-100 dark:hover:bg-surface-800 text-surface-400 dark:text-surface-500 transition-colors"
+                aria-label="Toggle dark mode"
+              >
+                {dark ? <Sun size={14} /> : <Moon size={14} />}
+              </button>
+            )}
+            <button
+              onClick={() => setLeftCollapsed(true)}
+              className="p-1 rounded hover:bg-blue-100 dark:hover:bg-surface-800 text-surface-400 dark:text-surface-500 transition-colors"
+              title="Hide watchlist"
+            >
+              <PanelLeftClose size={14} />
+            </button>
+          </div>
           <div className="flex-1 flex flex-col overflow-hidden">
             {sidebar}
           </div>

@@ -29,8 +29,6 @@ export default function DashboardPage() {
           loading={loading}
           onAdd={add}
           onRemove={handleRemove}
-          dark={dark}
-          onToggleDark={toggle}
         />
       }
       center={<CenterContent dark={dark} />}

@@ -1,78 +1,44 @@
 import axios from 'axios';
-import { getAccessToken, getRefreshToken, setTokens, clearTokens } from '../utils/token';
 import { API_URL } from '../utils/constants';
 
 const client = axios.create({
   baseURL: API_URL,
 });
 
-client.interceptors.request.use((config) => {
-  const token = getAccessToken();
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
+/**
+ * Lazy-create a session via POST /api/session and cache in sessionStorage.
+ * Each browser tab gets its own isolated session.
+ */
+let sessionPromise = null;
 
-let isRefreshing = false;
-let failedQueue = [];
-
-function processQueue(error, token) {
-  failedQueue.forEach(({ resolve, reject }) => {
-    if (error) reject(error);
-    else resolve(token);
-  });
-  failedQueue = [];
+export function getSessionId() {
+  return sessionStorage.getItem('session_id');
 }
 
-client.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    const originalRequest = error.config;
+async function ensureSession() {
+  const existing = getSessionId();
+  if (existing) return existing;
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      if (originalRequest.url?.includes('/auth/refresh')) {
-        clearTokens();
-        window.location.href = '/login';
-        return Promise.reject(error);
-      }
-
-      if (isRefreshing) {
-        return new Promise((resolve, reject) => {
-          failedQueue.push({ resolve, reject });
-        }).then((token) => {
-          originalRequest.headers.Authorization = `Bearer ${token}`;
-          return client(originalRequest);
-        });
-      }
-
-      originalRequest._retry = true;
-      isRefreshing = true;
-
-      try {
-        const refreshToken = getRefreshToken();
-        if (!refreshToken) throw new Error('No refresh token');
-
-        const { data } = await axios.post(`${API_URL}/api/auth/refresh`, {
-          refresh_token: refreshToken,
-        });
-
-        setTokens(data.access_token, null);
-        processQueue(null, data.access_token);
-        originalRequest.headers.Authorization = `Bearer ${data.access_token}`;
-        return client(originalRequest);
-      } catch (refreshError) {
-        processQueue(refreshError, null);
-        clearTokens();
-        window.location.href = '/login';
-        return Promise.reject(refreshError);
-      } finally {
-        isRefreshing = false;
-      }
-    }
-
-    return Promise.reject(error);
+  // Deduplicate concurrent calls
+  if (!sessionPromise) {
+    sessionPromise = axios
+      .post(`${API_URL}/api/session`)
+      .then(({ data }) => {
+        sessionStorage.setItem('session_id', data.session_id);
+        return data.session_id;
+      })
+      .finally(() => {
+        sessionPromise = null;
+      });
   }
-);
+  return sessionPromise;
+}
+
+// Attach X-Session-Id header to every request
+client.interceptors.request.use(async (config) => {
+  const sessionId = await ensureSession();
+  config.headers['X-Session-Id'] = sessionId;
+  return config;
+});
 
 export default client;

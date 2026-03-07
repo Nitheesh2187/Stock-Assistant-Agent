@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getMessages } from '../api/chat';
-import { getAccessToken } from '../utils/token';
 import { WS_URL } from '../utils/constants';
+import { getSessionId } from '../api/client';
 
 export function useWebSocket(symbol) {
   const [messages, setMessages] = useState([]);
@@ -42,10 +42,12 @@ export function useWebSocket(symbol) {
   useEffect(() => {
     if (!symbol) return;
 
-    const token = getAccessToken();
-    if (!token) return;
+    const sessionId = getSessionId();
+    if (!sessionId) return;
 
-    const ws = new WebSocket(`${WS_URL}/api/chat/${encodeURIComponent(symbol)}/ws?token=${token}`);
+    const ws = new WebSocket(
+      `${WS_URL}/api/chat/${encodeURIComponent(symbol)}/ws?session_id=${encodeURIComponent(sessionId)}`
+    );
     wsRef.current = ws;
 
     ws.onopen = () => setConnected(true);

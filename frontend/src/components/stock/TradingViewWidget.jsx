@@ -1,10 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { mapToTradingViewSymbol } from '../../utils/format';
 import { useResizable } from '../../hooks/useResizable';
+import ExpandableBlock from '../ui/ExpandableBlock';
 
 export default function TradingViewWidget({ symbol, dark }) {
-  const containerRef = useRef(null);
-
   const { size: chartHeight, isDragging, handleMouseDown } = useResizable({
     direction: 'vertical',
     initialSize: 450,
@@ -12,6 +11,25 @@ export default function TradingViewWidget({ symbol, dark }) {
     maxSize: 800,
     storageKey: 'chart-height',
   });
+
+  return (
+    <ExpandableBlock>
+      {(expanded) => (
+        <TradingViewInner
+          symbol={symbol}
+          dark={dark}
+          expanded={expanded}
+          chartHeight={chartHeight}
+          isDragging={isDragging}
+          handleMouseDown={handleMouseDown}
+        />
+      )}
+    </ExpandableBlock>
+  );
+}
+
+function TradingViewInner({ symbol, dark, expanded, chartHeight, isDragging, handleMouseDown }) {
+  const containerRef = useRef(null);
 
   useEffect(() => {
     if (!symbol || !containerRef.current) return;
@@ -28,7 +46,7 @@ export default function TradingViewWidget({ symbol, dark }) {
     script.async = true;
     script.innerHTML = JSON.stringify({
       width: '100%',
-      height: '450',
+      height: expanded ? '100%' : String(chartHeight),
       symbol: tvSymbol,
       interval: 'D',
       timezone: 'Asia/Kolkata',
@@ -48,24 +66,24 @@ export default function TradingViewWidget({ symbol, dark }) {
     return () => {
       container.innerHTML = '';
     };
-  }, [symbol, dark]);
+  }, [symbol, dark, expanded, chartHeight]);
 
   return (
-    <div className="relative">
-      {/* Fixed overlay during drag */}
+    <div className="relative" style={{ height: expanded ? '100%' : undefined }}>
       {isDragging && <div className="fixed inset-0 z-50" />}
       <div
         ref={containerRef}
         className="tradingview-widget-container w-full rounded-lg overflow-hidden border border-surface-200 dark:border-surface-800"
-        style={{ height: chartHeight }}
+        style={{ height: expanded ? '100%' : chartHeight }}
       />
-      {/* Bottom drag handle */}
-      <div
-        onMouseDown={handleMouseDown}
-        className="group flex items-center justify-center h-3 cursor-row-resize hover:bg-surface-200/60 dark:hover:bg-surface-700/60 transition-colors"
-      >
-        <div className="w-10 h-1 rounded-full bg-surface-300 dark:bg-surface-600 group-hover:bg-primary-400 transition-colors" />
-      </div>
+      {!expanded && (
+        <div
+          onMouseDown={handleMouseDown}
+          className="group flex items-center justify-center h-3 cursor-row-resize hover:bg-surface-200/60 dark:hover:bg-surface-700/60 transition-colors"
+        >
+          <div className="w-10 h-1 rounded-full bg-surface-300 dark:bg-surface-600 group-hover:bg-primary-400 transition-colors" />
+        </div>
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 
 import httpx
 
@@ -7,7 +8,21 @@ from backend.agent_manager import agent_manager
 
 logger = logging.getLogger(__name__)
 
+
+def _sanitize(obj):
+    """Replace NaN/Infinity floats with None and stringify non-serializable keys."""
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    if isinstance(obj, dict):
+        return {str(k): _sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize(v) for v in obj]
+    return obj
+
 YAHOO_SEARCH_URL = "https://query2.finance.yahoo.com/v1/finance/search"
+
+# Indian exchanges only
+SUPPORTED_EXCHANGES = {"NSI", "NSE", "BOM", "BSE"}
 
 
 async def get_stock_quote(symbol: str) -> dict:
@@ -20,8 +35,8 @@ async def get_stock_quote(symbol: str) -> dict:
 async def get_stock_fundamentals(symbol: str) -> dict:
     result = await agent_manager.call_tool("get_stock_fundamentals", {"ticker": symbol})
     if isinstance(result, str):
-        return json.loads(result)
-    return result
+        result = json.loads(result)
+    return _sanitize(result)
 
 
 async def get_stock_news(symbol: str, stock_name: str, limit: int = 10) -> dict:
@@ -49,11 +64,16 @@ async def search_stocks(query: str) -> list[dict]:
 
         results = []
         for quote in data.get("quotes", []):
+            exchange = quote.get("exchange", "")
+            quote_type = quote.get("quoteType", "")
+            # Only include equities from supported exchanges
+            if quote_type != "EQUITY" or exchange not in SUPPORTED_EXCHANGES:
+                continue
             results.append({
                 "symbol": quote.get("symbol", ""),
                 "name": quote.get("shortname") or quote.get("longname", ""),
-                "exchange": quote.get("exchange", ""),
-                "type": quote.get("quoteType", ""),
+                "exchange": exchange,
+                "type": quote_type,
             })
         return results
 

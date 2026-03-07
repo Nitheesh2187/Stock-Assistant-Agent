@@ -1,42 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, EmailStr
-
-
-# ── Auth ──────────────────────────────────────────────────────────────────────
-
-class RegisterRequest(BaseModel):
-    email: EmailStr
-    name: str
-    password: str
-
-
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
-
-
-class RefreshRequest(BaseModel):
-    refresh_token: str
-
-
-class UserResponse(BaseModel):
-    id: str
-    email: str
-    name: str
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class AuthResponse(BaseModel):
-    user: UserResponse
-    access_token: str
-    refresh_token: str
-
-
-class TokenResponse(BaseModel):
-    access_token: str
+from pydantic import BaseModel
 
 
 # ── Watchlist ─────────────────────────────────────────────────────────────────
@@ -50,10 +13,7 @@ class WatchlistItemResponse(BaseModel):
     id: str
     symbol: str
     stock_name: str
-    added_at: datetime
-
-    class Config:
-        from_attributes = True
+    added_at: str
 
 
 class StockSearchResult(BaseModel):
@@ -69,10 +29,7 @@ class MessageResponse(BaseModel):
     id: str
     role: str
     content: str
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
+    created_at: str
 
 
 class MessageHistoryResponse(BaseModel):
