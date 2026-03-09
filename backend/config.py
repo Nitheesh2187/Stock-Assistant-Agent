@@ -15,8 +15,8 @@ class Settings(BaseSettings):
     FIRECRAWL_API_KEY: str = os.getenv("FIRECRAWL_API_KEY", "")
 
     # LLM
-    LLM_MODEL: str = "qwen/qwen3-32b"
-    LLM_TEMPERATURE: float = 0.2
+    LLM_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"
+    LLM_TEMPERATURE: float = 0.6
 
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]

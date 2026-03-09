@@ -20,8 +20,8 @@ async def lifespan(app: FastAPI):
     await agent_manager.initialize()
     logger.info("Startup complete.")
     yield
-    # Shutdown
-    logger.info("Shutting down...")
+    # Shutdown — cleanly terminate MCP subprocesses
+    await agent_manager.shutdown()
 
 
 app = FastAPI(title="Stock Assistant API", version="1.0.0", lifespan=lifespan)

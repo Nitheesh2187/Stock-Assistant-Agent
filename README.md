@@ -1,53 +1,54 @@
 # Stock Assistance Agent
 
-A powerful AI-powered stock market assistant built with LangChain, Streamlit, and Model Context Protocol (MCP) servers. This intelligent agent provides comprehensive stock analysis, real-time quotes, fundamental data, market news, and web scraping capabilities to help you make informed investment decisions.
+AI-powered stock market assistant built with FastAPI, React, LangChain, and MCP (Model Context Protocol) servers. Provides real-time stock quotes, fundamental analysis, market news, and web scraping through an interactive chat interface with streaming responses.
 
-## 🚀 Features
+## Features
 
-- **Real-time Stock Quotes**: Get current stock prices and trading data
-- **Fundamental Analysis**: Access P/E ratios, revenue growth, debt levels, and key financial metrics
-- **Market News**: Stay updated with latest earnings, announcements, and market-moving news
-- **Comprehensive Stock Analysis**: Combined analysis of price, fundamentals, and news
+- **Real-time Stock Quotes**: Current prices, daily range, volume via Yahoo Finance with Alpha Vantage fallback
+- **Fundamental Analysis**: P/E ratios, financials, balance sheet, cash flow, ESG data
+- **Market News**: Aggregated from Yahoo Finance and Google News RSS
 - **Web Scraping**: Extract data from financial websites using Firecrawl
-- **Interactive Chat Interface**: Streamlit-based conversational UI
-- **Memory Management**: Maintains conversation context for better interactions
+- **Streaming Chat**: Per-stock WebSocket chat with token streaming and tool call indicators
+- **Watchlist**: Add/remove stocks, search via Yahoo Finance autocomplete
+- **TradingView Charts**: Embedded Advanced Chart widget with NSE/BSE symbol mapping
+- **Dark Mode**: Full dark mode support
 
-## 🛠️ Architecture
+## Architecture
 
-This project leverages two MCP (Model Context Protocol) servers:
+```
+React + Tailwind ◄──── WebSocket / REST ────► FastAPI Backend
+                                                    │
+                                              AgentManager
+                                           (cached executors,
+                                            persistent MCP sessions)
+                                                    │
+                                      ┌─────────────┴─────────────┐
+                                      │                           │
+                               stock_mcp server          firecrawl-mcp server
+                              (Yahoo Finance,            (npx subprocess)
+                               Alpha Vantage)
+```
 
-1. **Custom Stock MCP Server**: A specialized server for stock market data
-   - Repository: [Stock Analysis MCP Server](https://github.com/Nitheesh2187/Stock-Analysis-MCP-Server.git)
-   - Provides tools: `get_stock_quote`, `get_stock_fundamentals`, `get_stock_news`, `get_stock_analysis`
-   - Powered by Alpha Vantage API for comprehensive financial data
+### Key Design Decisions
 
-2. **Firecrawl MCP Server**: Web scraping capabilities
-   - Tool: `firecrawl_scrape`
-   - Enables extraction of data from financial websites and news sources
+- **Persistent MCP sessions**: Subprocesses start once at boot via `AsyncExitStack`, not per tool call. Gracefully terminated on shutdown.
+- **Cached agent executors**: `AgentExecutor` + `ConversationBufferMemory` cached per `(session_id, symbol)` with 30-min TTL. Cold starts rebuild memory from stored history.
+- **Per-conversation locking**: `asyncio.Lock` per conversation prevents concurrent agent runs corrupting shared memory.
+- **Self-contained `chat_stream()`**: Owns the full message lifecycle (save user message → run agent → save assistant response).
 
-## 📋 Prerequisites
+## Prerequisites
 
-- Python 3.8+
+- Python 3.10+
 - Node.js (for Firecrawl MCP server)
 - Docker and Docker Compose (for containerized deployment)
 
-## 🔑 Required API Keys
+## Required API Keys
 
-You'll need to obtain the following API keys:
+1. **GROQ_API_KEY**: Get from [Groq](https://console.groq.com/keys)
+2. **ALPHAVANTAGE_API_KEY**: Get from [Alpha Vantage](https://www.alphavantage.co/support/#api-key) (fallback data source)
+3. **FIRECRAWL_API_KEY**: Get from [Firecrawl](https://firecrawl.dev/)
 
-1. **ALPHAVANTAGE_API_KEY**: 
-   - Get from [Alpha Vantage](https://www.alphavantage.co/support/#api-key)
-   - Free tier available, premium plans for higher request limits
-
-2. **FIRECRAWL_API_KEY**: 
-   - Get from [Firecrawl](https://firecrawl.dev/)
-   - Used for web scraping capabilities
-
-3. **GROQ_API_KEY**: 
-   - Get from [Groq](https://console.groq.com/keys)
-   - Powers the conversational AI using Qwen3-32B model
-
-## 🚀 Installation & Setup
+## Installation & Setup
 
 ### Option 1: Local Installation
 
@@ -57,182 +58,101 @@ You'll need to obtain the following API keys:
    cd stock-assistance-agent
    ```
 
-2. **Install Python dependencies**
+2. **Install dependencies**
+   ```bash
+   make install    # installs pip + npm dependencies
+   ```
+
+   Or manually:
    ```bash
    pip install -r requirements.txt
-   ```
-
-3. **Install the custom Stock MCP Server**
-   ```bash
    pip install git+https://github.com/Nitheesh2187/Stock-Analysis-MCP-Server.git
-   ```
-   
-   > **Note**: For detailed information about the Stock MCP Server, including its features, configuration options, and API documentation, please refer to the [Stock Analysis MCP Server repository](https://github.com/Nitheesh2187/Stock-Analysis-MCP-Server.git).
-
-4. **Install Firecrawl MCP Server**
-   ```bash
-   npm install -g firecrawl-mcp
+   cd frontend && npm install
    ```
 
-5. **Set up environment variables**
-   
+3. **Set up environment variables**
+
    Create a `.env` file in the project root:
    ```env
+   GROQ_API_KEY=your_groq_api_key_here
    ALPHAVANTAGE_API_KEY=your_alphavantage_api_key_here
    FIRECRAWL_API_KEY=your_firecrawl_api_key_here
-   GROQ_API_KEY=your_groq_api_key_here
    ```
 
-6. **Run the application**
+4. **Run the application** (two terminals)
    ```bash
-   streamlit run app.py
+   make backend    # FastAPI on http://localhost:8000
+   make frontend   # Vite on http://localhost:5173
    ```
-
-   The application will be available at `http://localhost:8501`
 
 ### Option 2: Docker Deployment
 
-1. **Clone the repository**
+1. **Clone and set up `.env`** (same as above)
+
+2. **Build and run**
    ```bash
-   git clone https://github.com/Nitheesh2187/Stock-Assistant-Agent.git
-   cd stock-assistance-agent
+   docker-compose up --build     # http://localhost:8051
+   docker-compose up -d          # detached mode
+   docker-compose down           # stop
    ```
 
-2. **Set up environment variables**
-   
-   Create a `.env` file in the project root with your API keys:
-   ```env
-   ALPHAVANTAGE_API_KEY=your_alphavantage_api_key_here
-   FIRECRAWL_API_KEY=your_firecrawl_api_key_here
-   GROQ_API_KEY=your_groq_api_key_here
-   ```
-
-   Or
-
-   Add the API keys in the docker compose file:
-   ```env
-    environment:
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
-      - ALPHAVANTAGE_API_KEY=${ALPHAVANTAGE_API_KEY}
-    ```
-
-3. **Build and run with Docker Compose**
-   ```bash
-   docker-compose up --build
-   ```
-
-   The application will be available at `http://localhost:8501`
-
-4. **Run in detached mode (optional)**
-   ```bash
-   docker-compose up -d
-   ```
-
-5. **Stop the application**
-   ```bash
-   docker-compose down
-   ```
-
-## 🎯 Usage Examples
-
-Once the application is running, you can interact with the Stock Assistant through the web interface:
-
-### Indian Stock Market Examples:
-- "What is the current price of Reliance Industries?"
-- "Show me the fundamentals for TCS (TCS.NS)"
-- "Get the latest news about Infosys stock"
-- "Perform a comprehensive analysis of HDFC Bank (HDFCBANK.NS)"
-- "What are the P/E ratios for IT sector stocks like Wipro and Tech Mahindra?"
-- "Analyze State Bank of India (SBIN.NS) financials"
-- "Show me Tata Motors stock performance and news"
-- "Compare fundamentals of ICICI Bank vs HDFC Bank"
-- "Get current price and analysis for Bharti Airtel"
-- "What's the latest news on Adani Group stocks?"
-
-### Global Market Examples:
-- "What is the current price of Apple stock?"
-- "Show me the fundamentals for Microsoft (MSFT)"
-- "Get the latest news about Tesla"
-- "Perform a comprehensive analysis of Google stock"
-- "What are the P/E ratios for FAANG stocks?"
-
-## 🏗️ Project Structure
+## Project Structure
 
 ```
 stock-assistance-agent/
-├── src/
-│   ├── agent.py          # Main agent class
-│   ├── style.css         # Streamlit styling
-│   └── utils.py          # Utility functions (if any)
-├── app.py                # Streamlit web application
-├── requirements.txt      # Python dependencies
-├── Dockerfile           # Docker configuration
-├── docker-compose.yaml   # Docker Compose configuration
-├── .env.example         # Environment variables template
-└── README.md           # This file
+├── backend/
+│   ├── main.py              # FastAPI app, lifespan (startup/shutdown)
+│   ├── agent_manager.py     # AgentManager singleton (MCP sessions, executor cache, chat_stream)
+│   ├── config.py            # Settings (API keys, LLM config, CORS)
+│   ├── store.py             # In-memory storage (sessions, watchlists, conversations)
+│   ├── dependencies.py      # FastAPI dependencies (session ID extraction)
+│   ├── schemas.py           # Pydantic models
+│   ├── routers/
+│   │   ├── chat.py          # WebSocket streaming + REST message history
+│   │   ├── stocks.py        # Stock quote/fundamentals/news endpoints
+│   │   └── watchlist.py     # Watchlist CRUD + stock search
+│   └── services/
+│       ├── chat_service.py  # Conversation CRUD helpers
+│       └── stock_service.py # MCP tool call wrappers + Yahoo search
+├── frontend/                # React + Vite + Tailwind CSS v4
+├── Dockerfile
+├── docker-compose.yaml
+├── Makefile
+├── requirements.txt
+└── .env                     # API keys (not committed)
 ```
 
-## 🔧 Configuration
+## MCP Server Configuration
 
-### MCP Server Configuration
+Two MCP servers run as persistent stdio subprocesses:
 
-The agent is configured to use two MCP servers:
+| Server | Command | Tools | Data Sources |
+|--------|---------|-------|-------------|
+| stock_tools | `python -m stock_mcp.server` | `get_stock_quote`, `get_stock_fundamentals`, `get_stock_news` | Yahoo Finance, Alpha Vantage |
+| firecrawl-mcp | `npx -y firecrawl-mcp` | `firecrawl_scrape` | Firecrawl API |
 
-```python
-{
-    "stock_tools": {
-        "command": "python",
-        "args": ["-m", "stock_mcp.server"],
-        "transport": "stdio"
-    },
-    "firecrawl-mcp": {
-        "command": "npx",
-        "args": ["-y", "firecrawl-mcp"],
-        "env": {
-            "FIRECRAWL_API_KEY": os.getenv("FIRECRAWL_API_KEY")
-        },
-        "transport": "stdio"
-    }
-}
-```
+## Usage Examples
 
-### Available Tools
+- "What is the current price of Reliance Industries?"
+- "Show me the fundamentals for TCS (TCS.NS)"
+- "Get the latest news about Infosys stock"
+- "Compare fundamentals of ICICI Bank vs HDFC Bank"
+- "What are the P/E ratios for IT sector stocks?"
 
-- `get_stock_quote`: Real-time stock price data
-- `get_stock_fundamentals`: Financial metrics and ratios
-- `get_stock_news`: Latest market news and announcements
-- `get_stock_analysis`: Comprehensive stock analysis
-- `firecrawl_scrape`: Web scraping for additional data
+## Troubleshooting
 
-## 🐛 Troubleshooting
+1. **MCP Server Connection Failed**: Ensure all API keys are set in `.env`, verify Node.js is installed for Firecrawl
+2. **Rate Limit Errors**: Alpha Vantage free tier has 25 requests/day. Yahoo Finance is the primary source.
+3. **Docker Issues**: Ensure Docker and Docker Compose are installed, check that required ports are available
 
-### Common Issues:
-
-1. **MCP Server Connection Failed**
-   - Ensure all API keys are correctly set in `.env`
-   - Verify the Stock MCP Server is properly installed
-   - Check that Node.js is installed for Firecrawl MCP
-
-2. **Rate Limit Errors**
-   - The agent includes exponential backoff for rate limiting
-   - Consider upgrading API plans for higher limits
-
-3. **Docker Issues**
-   - Ensure Docker and Docker Compose are installed
-   - Check that ports 8501 is available
-   - Verify `.env` file is in the correct location
-
-## 📄 License
+## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
+## Related Resources
 
-## 🔗 Related Resources
-
-- [Stock Analysis MCP Server](https://github.com/Nitheesh2187/Stock-Analysis-MCP-Server.git) - Custom MCP server for stock data
+- [Stock Analysis MCP Server](https://github.com/Nitheesh2187/Stock-Analysis-MCP-Server.git)
 - [LangChain Documentation](https://python.langchain.com/docs/get_started/introduction)
-- [Streamlit Documentation](https://docs.streamlit.io/)
 - [Alpha Vantage API](https://www.alphavantage.co/documentation/)
 - [Firecrawl Documentation](https://docs.firecrawl.dev/)
 - [Groq Documentation](https://console.groq.com/docs)

@@ -7,11 +7,8 @@ from backend.agent_manager import agent_manager
 from backend.dependencies import get_session_id
 from backend.schemas import MessageHistoryResponse, MessageResponse
 from backend.services.chat_service import (
-    add_message,
     delete_conversation,
-    get_conversation_history,
     get_messages,
-    get_or_create_conversation,
 )
 from backend.store import ensure_session
 
@@ -38,23 +35,12 @@ async def websocket_chat(websocket: WebSocket, symbol: str, session_id: str = Qu
 
             user_message = data["content"].strip()
 
-            conv = get_or_create_conversation(session_id, symbol)
-            conversation_id = conv["id"]
-            add_message(session_id, symbol, "user", user_message)
-            history = get_conversation_history(session_id, symbol)
-
-            stock_name = symbol.split(".")[0] if "." in symbol else symbol
-
-            full_response = ""
             async for event in agent_manager.chat_stream(
-                conversation_id=conversation_id,
-                user_message=user_message,
+                session_id=session_id,
                 symbol=symbol,
-                stock_name=stock_name,
-                history=history[:-1],
+                user_message=user_message,
             ):
                 if event["type"] == "token":
-                    full_response = event.get("full_response", full_response)
                     await websocket.send_text(json.dumps({"type": "token", "content": event["content"]}))
 
                 elif event["type"] == "tool_start":
@@ -64,13 +50,9 @@ async def websocket_chat(websocket: WebSocket, symbol: str, session_id: str = Qu
                     await websocket.send_text(json.dumps({"type": "tool_end", "tool_name": event["tool_name"]}))
 
                 elif event["type"] == "done":
-                    full_response = event.get("full_response", full_response)
-                    if full_response:
-                        add_message(session_id, symbol, "assistant", full_response)
                     await websocket.send_text(json.dumps({"type": "done"}))
 
                 elif event["type"] == "error":
-                    add_message(session_id, symbol, "error", event["content"])
                     await websocket.send_text(json.dumps({"type": "error", "content": event["content"]}))
 
     except WebSocketDisconnect:
@@ -109,4 +91,4 @@ async def clear_chat(
     deleted = delete_conversation(session_id, symbol)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No conversation found")
-    agent_manager.remove_lock(f"{session_id}_{symbol}")
+    agent_manager.remove_executor(session_id, symbol)
