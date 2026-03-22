@@ -1,24 +1,15 @@
-"""In-memory session-scoped storage — no database, no persistence."""
+"""Session management — async PostgreSQL backed."""
 
-import uuid
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-# session_id → True
-sessions: dict[str, bool] = {}
-
-# session_id → list[{id, symbol, stock_name, added_at}]
-watchlists: dict[str, list[dict]] = {}
-
-# (session_id, symbol) → {id, messages: list[{id, role, content, created_at}]}
-conversations: dict[tuple[str, str], dict] = {}
+from backend.models import Session
 
 
-def new_id() -> str:
-    return str(uuid.uuid4())
-
-
-def ensure_session(session_id: str) -> str:
-    """Register a session if not already known and return it."""
-    if session_id not in sessions:
-        sessions[session_id] = True
-        watchlists[session_id] = []
+async def ensure_session(db: AsyncSession, session_id: str) -> str:
+    """Register a session if not already known and return its ID."""
+    result = await db.execute(select(Session).where(Session.id == session_id))
+    if result.scalar_one_or_none() is None:
+        db.add(Session(id=session_id))
+        await db.commit()
     return session_id

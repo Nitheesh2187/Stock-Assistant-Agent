@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import sys
 import time
 from collections.abc import AsyncGenerator
 from contextlib import AsyncExitStack
@@ -13,14 +12,12 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_groq import ChatGroq
 from langchain_mcp_adapters.sessions import create_session
 from langchain_mcp_adapters.tools import load_mcp_tools
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
 from backend.services.chat_service import add_message, get_conversation_history
 
 logger = logging.getLogger(__name__)
-
-# How long (seconds) a cached executor stays alive without being used
-EXECUTOR_TTL_SECONDS = 30 * 60  # 30 minutes
 
 
 @dataclass
@@ -31,45 +28,9 @@ class CachedExecutor:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     last_used: float = field(default_factory=time.monotonic)
 
-SYSTEM_PROMPT = """You are analyzing {symbol} ({stock_name}).
-You are a helpful stock market assistant with access to real-time stock data, financial analysis tools, and web scraping capabilities.
-
-You can help with:
-- Real-time stock quotes and price data
-- Company fundamentals and financial metrics
-- Latest stock news and market developments
-- Comprehensive stock analysis
-- Web scraping for additional research
-
-You provide information for educational and research purposes only.
-Never recommend buying, selling, or holding any specific stock.
-Always present data clearly and explain your reasoning."""
-
 
 class AgentManager:
     """Singleton managing shared LLM + MCP tools, with per-conversation streaming."""
-
-    # MCP server connection configs
-    MCP_SERVERS: dict = {
-        "stock_tools": {
-            "command": sys.executable,
-            "args": ["-m", "stock_mcp.server"],
-            "transport": "stdio",
-        },
-        "firecrawl-mcp": {
-            "command": "npx",
-            "args": ["-y", "firecrawl-mcp"],
-            "env": {"FIRECRAWL_API_KEY": settings.FIRECRAWL_API_KEY},
-            "transport": "stdio",
-        },
-    }
-
-    REQUIRED_TOOLS = {
-        "get_stock_quote",
-        "get_stock_fundamentals",
-        "get_stock_news",
-        "firecrawl_scrape",
-    }
 
     def __init__(self):
         self.llm: ChatGroq | None = None
@@ -96,7 +57,7 @@ class AgentManager:
         self._exit_stack = AsyncExitStack()
         all_tools = []
 
-        for server_name, connection in self.MCP_SERVERS.items():
+        for server_name, connection in settings.mcp_servers.items():
             try:
                 session = await self._exit_stack.enter_async_context(
                     create_session(connection)
@@ -108,7 +69,7 @@ class AgentManager:
             except Exception:
                 logger.exception(f"Failed to connect to MCP server '{server_name}'")
 
-        self.tools = [t for t in all_tools if t.name in self.REQUIRED_TOOLS]
+        self.tools = [t for t in all_tools if t.name in settings.REQUIRED_TOOLS]
         self._tool_map = {t.name: t for t in self.tools}
 
         logger.info(f"AgentManager ready. Tools: {list(self._tool_map.keys())}")
@@ -139,8 +100,9 @@ class AgentManager:
     def _cache_key(self, session_id: str, symbol: str) -> str:
         return f"{session_id}_{symbol}"
 
-    def _get_or_create_executor(
+    async def _get_or_create_executor(
         self,
+        db: AsyncSession,
         session_id: str,
         symbol: str,
         stock_name: str,
@@ -153,7 +115,7 @@ class AgentManager:
             return cached
 
         # Cold start: build memory from stored history
-        history = get_conversation_history(session_id, symbol)
+        history = await get_conversation_history(db, session_id, symbol)
         memory = ConversationBufferMemory(
             memory_key="chat_history", return_messages=True
         )
@@ -164,7 +126,7 @@ class AgentManager:
                 memory.chat_memory.add_message(AIMessage(content=msg["content"]))
 
         prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT.format(symbol=symbol, stock_name=stock_name)),
+            ("system", settings.SYSTEM_PROMPT.format(symbol=symbol, stock_name=stock_name)),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),
             MessagesPlaceholder(variable_name="agent_scratchpad"),
@@ -179,7 +141,7 @@ class AgentManager:
             memory=memory,
             verbose=False,
             handle_parsing_errors=True,
-            max_iterations=5,
+            max_iterations=settings.AGENT_MAX_ITERATIONS,
         )
 
         entry = CachedExecutor(executor=executor, memory=memory)
@@ -192,7 +154,7 @@ class AgentManager:
         now = time.monotonic()
         stale = [
             key for key, entry in self._executors.items()
-            if now - entry.last_used > EXECUTOR_TTL_SECONDS
+            if now - entry.last_used > settings.EXECUTOR_TTL_SECONDS
         ]
         for key in stale:
             del self._executors[key]
@@ -200,6 +162,7 @@ class AgentManager:
 
     async def chat_stream(
         self,
+        db: AsyncSession,
         session_id: str,
         symbol: str,
         user_message: str,
@@ -209,6 +172,7 @@ class AgentManager:
         Handles history reads and message persistence internally.
 
         Args:
+            db: Async database session.
             session_id: The user's session ID.
             symbol: Stock ticker symbol (e.g. "RELIANCE.NS").
             user_message: The user's input text.
@@ -221,12 +185,12 @@ class AgentManager:
         stock_name = symbol.split(".")[0] if "." in symbol else symbol
 
         # Get or create the cached entry (includes the lock)
-        cached = self._get_or_create_executor(session_id, symbol, stock_name)
+        cached = await self._get_or_create_executor(db, session_id, symbol, stock_name)
 
         async with cached.lock:
             try:
-                # Save user message to store
-                add_message(session_id, symbol, "user", user_message)
+                # Save user message to DB
+                await add_message(db, session_id, symbol, "user", user_message)
 
                 executor = cached.executor
                 memory = cached.memory
@@ -250,9 +214,9 @@ class AgentManager:
                     elif kind == "on_tool_end":
                         yield {"type": "tool_end", "tool_name": event.get("name", "")}
 
-                # Save assistant response to store
+                # Save assistant response to DB
                 if full_response:
-                    add_message(session_id, symbol, "assistant", full_response)
+                    await add_message(db, session_id, symbol, "assistant", full_response)
 
                 yield {"type": "done", "full_response": full_response}
 
