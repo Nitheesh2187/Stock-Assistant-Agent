@@ -29,9 +29,11 @@ RUN uv pip install --no-cache git+https://github.com/Nitheesh2187/Stock-Analysis
 # ── Stage 3: Runtime ────────────────────────────────────────────────────────
 FROM python:3.12-slim-bookworm
 
-# Install Node.js (required for firecrawl-mcp via npx)
+# Install Node.js 22 (required for firecrawl-mcp via npx)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends nodejs npm && \
+    apt-get install -y --no-install-recommends ca-certificates curl && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
