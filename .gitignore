@@ -13,4 +13,3 @@ problems.txt
 .env
 check.py
 stock_assitant.db
-uv.lock
