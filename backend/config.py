@@ -45,11 +45,28 @@ class Settings(BaseSettings):
         "firecrawl_scrape",
     }
 
-    # Database
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/stock_assistant"
+    # Database — set DATABASE_URL directly (e.g. Render), or use individual fields
+    DATABASE_URL: str = ""
+    DB_USER: str = "postgres"
+    DB_PASSWORD: str = "postgres"
+    DB_HOST: str = "localhost"
+    DB_PORT: int = 5432
+    DB_NAME: str = "stock_assistant"
 
-    # CORS
+    @property
+    def db_url(self) -> str:
+        """Use DATABASE_URL if set, otherwise build from individual fields."""
+        if self.DATABASE_URL:
+            url = self.DATABASE_URL
+            # Render gives postgresql://, we need postgresql+asyncpg://
+            if url.startswith("postgresql://"):
+                url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            return url
+        return f"postgresql+asyncpg://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+
+    # CORS (comma-separated in env, e.g. CORS_ORIGINS=https://myapp.onrender.com,http://localhost:5173)
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]
+    CORS_ALLOW_ALL: bool = False  # Set to true in production if frontend is same-origin
 
     @property
     def mcp_servers(self) -> dict:
