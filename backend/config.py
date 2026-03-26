@@ -22,6 +22,13 @@ class Settings(BaseSettings):
     # Agent
     AGENT_MAX_ITERATIONS: int = 5
     EXECUTOR_TTL_SECONDS: int = 30 * 60  # 30 minutes
+    MAX_STREAM_RETRIES: int = 2
+    TOOL_CALL_RETRIES: int = 3
+    TOOL_CALL_TIMEOUT: int = 30  # seconds
+
+    # Circuit breaker — disable a tool after N consecutive failures
+    CIRCUIT_BREAKER_THRESHOLD: int = 5   # failures before tripping
+    CIRCUIT_BREAKER_COOLDOWN: int = 300  # seconds before re-enabling (5 min)
 
     SYSTEM_PROMPT: str = (
         "You are analyzing {symbol} ({stock_name}).\n"
