@@ -30,6 +30,14 @@ class Settings(BaseSettings):
     CIRCUIT_BREAKER_THRESHOLD: int = 5   # failures before tripping
     CIRCUIT_BREAKER_COOLDOWN: int = 300  # seconds before re-enabling (5 min)
 
+    # Tool cache TTLs (seconds) — per tool. Unspecified tools are not cached.
+    TOOL_CACHE_TTL: dict[str, int] = {
+        "get_stock_quote": 60,          # 1 min — prices change frequently
+        "get_stock_fundamentals": 600,  # 10 min — changes quarterly
+        "get_stock_news": 900,          # 15 min — headlines don't update per minute
+        "firecrawl_scrape": 1800,       # 30 min — web pages rarely change
+    }
+
     SYSTEM_PROMPT: str = (
         "You are analyzing {symbol} ({stock_name}).\n"
         "You are a helpful stock market assistant with access to real-time stock data, "

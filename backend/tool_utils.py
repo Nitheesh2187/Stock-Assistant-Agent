@@ -1,9 +1,11 @@
-"""Tool resilience utilities — schema coercion, retry, timeout, circuit breaker."""
+"""Tool resilience utilities — schema coercion, retry, timeout, circuit breaker, cache."""
 
 import asyncio
 import copy
+import json
 import logging
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from groq import APIError
@@ -60,6 +62,61 @@ class CircuitBreaker:
 
 
 circuit_breaker = CircuitBreaker()
+
+
+# ── Tool Cache ───────────────────────────────────────────────────────────────
+
+@dataclass
+class CacheEntry:
+    result: Any
+    cached_at: float  # time.monotonic
+
+
+class ToolCache:
+    """In-memory TTL cache for tool call results.
+    Also serves stale data as fallback when a tool call fails."""
+
+    def __init__(self):
+        self._store: dict[str, CacheEntry] = {}
+
+    def _key(self, tool_name: str, arguments: dict) -> str:
+        args_str = json.dumps(arguments, sort_keys=True, default=str)
+        return f"{tool_name}:{args_str}"
+
+    def get(self, tool_name: str, arguments: dict) -> tuple[Any | None, bool]:
+        """Return (cached_result, is_fresh). Returns (None, False) on miss."""
+        key = self._key(tool_name, arguments)
+        entry = self._store.get(key)
+        if entry is None:
+            return None, False
+
+        ttl = settings.TOOL_CACHE_TTL.get(tool_name, 0)
+        age = time.monotonic() - entry.cached_at
+        is_fresh = age < ttl
+        return entry.result, is_fresh
+
+    def get_stale(self, tool_name: str, arguments: dict) -> Any | None:
+        """Return cached result regardless of TTL (for fallback). None if no entry."""
+        key = self._key(tool_name, arguments)
+        entry = self._store.get(key)
+        if entry is None:
+            return None
+        age = time.monotonic() - entry.cached_at
+        logger.info(
+            f"[CACHE:{tool_name}] Returning STALE data (age={age:.0f}s) as fallback"
+        )
+        return entry.result
+
+    def put(self, tool_name: str, arguments: dict, result: Any) -> None:
+        key = self._key(tool_name, arguments)
+        self._store[key] = CacheEntry(result=result, cached_at=time.monotonic())
+        logger.debug(f"[CACHE:{tool_name}] Stored result, key={key[:80]}")
+
+    def clear(self) -> None:
+        self._store.clear()
+
+
+tool_cache = ToolCache()
 
 
 # ── User-friendly error messages ─────────────────────────────────────────────
@@ -158,20 +215,35 @@ def wrap_tool(tool: StructuredTool) -> StructuredTool:
         tool_name = tool.name
 
         async def resilient_coroutine(**kwargs):
-            # ── Circuit breaker check ──
+            fixed = coerce_tool_args(kwargs, raw_schema)
+            ttl = settings.TOOL_CACHE_TTL.get(tool_name, 0)
+
+            # ── 1. Check fresh cache ──
+            if ttl > 0:
+                cached_result, is_fresh = tool_cache.get(tool_name, fixed)
+                if is_fresh:
+                    logger.info(f"[TOOL:{tool_name}] CACHE HIT (fresh, ttl={ttl}s)")
+                    return cached_result
+
+            # ── 2. Circuit breaker check ──
             if circuit_breaker.is_open(tool_name):
                 logger.error(
                     f"[TOOL:{tool_name}] BLOCKED by circuit breaker — "
                     f"tool disabled after {settings.CIRCUIT_BREAKER_THRESHOLD} consecutive failures, "
                     f"cooldown {settings.CIRCUIT_BREAKER_COOLDOWN}s"
                 )
+                # Try stale cache as fallback before raising
+                if ttl > 0:
+                    stale = tool_cache.get_stale(tool_name, fixed)
+                    if stale is not None:
+                        return stale
                 raise RuntimeError(
                     f"The {tool_name} service is temporarily unavailable due to repeated failures. "
                     f"It will be re-enabled automatically in a few minutes. "
                     f"Please try again later."
                 )
 
-            fixed = coerce_tool_args(kwargs, raw_schema)
+            # ── 3. Call MCP server with retry + timeout ──
             last_err = None
             max_retries = settings.TOOL_CALL_RETRIES
 
@@ -193,6 +265,11 @@ def wrap_tool(tool: StructuredTool) -> StructuredTool:
                         f"in {elapsed:.2f}s"
                     )
                     circuit_breaker.record_success(tool_name)
+
+                    # Store in cache
+                    if ttl > 0:
+                        tool_cache.put(tool_name, fixed, result)
+
                     return result
 
                 except asyncio.TimeoutError:
@@ -221,12 +298,22 @@ def wrap_tool(tool: StructuredTool) -> StructuredTool:
                     )
                     await asyncio.sleep(backoff)
 
-            # ── All retries exhausted ──
+            # ── 4. All retries exhausted — try stale cache as fallback ──
             logger.error(
                 f"[TOOL:{tool_name}] ALL {max_retries} RETRIES EXHAUSTED — "
                 f"last error: {type(last_err).__name__}: {last_err}"
             )
             circuit_breaker.record_failure(tool_name)
+
+            if ttl > 0:
+                stale = tool_cache.get_stale(tool_name, fixed)
+                if stale is not None:
+                    logger.info(
+                        f"[TOOL:{tool_name}] Returning stale cache as fallback "
+                        f"after all retries failed"
+                    )
+                    return stale
+
             raise last_err  # type: ignore[misc]
 
         tool.coroutine = resilient_coroutine
