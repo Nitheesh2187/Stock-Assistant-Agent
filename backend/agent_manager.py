@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
 from backend.services.chat_service import add_message, get_conversation_history
-from backend.tool_utils import wrap_tool, friendly_error
+from backend.tool_utils import wrap_tool, friendly_error, check_guardrail
 
 logger = logging.getLogger(__name__)
 
@@ -269,11 +269,17 @@ class AgentManager:
                         )
                         raise
 
-                # Save assistant response to DB
+                # Guardrail: check for trading advice, append disclaimer if flagged
+                disclaimer = ""
                 if full_response:
+                    checked = check_guardrail(full_response)
+                    if checked != full_response:
+                        # Guardrail appended a disclaimer
+                        disclaimer = checked[len(full_response):]
+                        full_response = checked
                     await add_message(db, session_id, symbol, "assistant", full_response)
 
-                yield {"type": "done", "full_response": full_response}
+                yield {"type": "done", "full_response": full_response, "disclaimer": disclaimer}
 
             except Exception as e:
                 total_elapsed = time.monotonic() - stream_start if 'stream_start' in dir() else 0

@@ -119,6 +119,58 @@ class ToolCache:
 tool_cache = ToolCache()
 
 
+# ── Output Guardrail ─────────────────────────────────────────────────────────
+
+# Phrases that indicate trading advice — checked case-insensitively
+_UNSAFE_PHRASES = [
+    "you should buy",
+    "you should sell",
+    "you should hold",
+    "i recommend buying",
+    "i recommend selling",
+    "i recommend holding",
+    "i suggest buying",
+    "i suggest selling",
+    "consider buying",
+    "consider selling",
+    "consider purchasing",
+    "consider investing",
+    "strong buy",
+    "strong sell",
+    "it is a good time to buy",
+    "it is a good time to sell",
+    "it's a good time to buy",
+    "it's a good time to sell",
+    "target price of",
+    "price target of",
+    "i advise you to",
+    "my recommendation is",
+    "you should invest in",
+    "accumulate this stock",
+    "add to your portfolio",
+    "exit your position",
+    "book profits",
+    "buy at current levels",
+    "sell at current levels",
+]
+
+
+def check_guardrail(response: str) -> str:
+    """Check the LLM response for trading advice. If flagged, append a disclaimer.
+    Returns the (possibly modified) response."""
+    response_lower = response.lower()
+    flagged = [phrase for phrase in _UNSAFE_PHRASES if phrase in response_lower]
+
+    if flagged:
+        logger.warning(
+            f"[GUARDRAIL] Response flagged for trading advice — "
+            f"matched phrases: {flagged}"
+        )
+        return response + settings.GUARDRAIL_DISCLAIMER
+
+    return response
+
+
 # ── User-friendly error messages ─────────────────────────────────────────────
 
 def friendly_error(error: Exception) -> str:
