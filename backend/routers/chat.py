@@ -58,6 +58,10 @@ async def websocket_chat(websocket: WebSocket, symbol: str, session_id: str = Qu
                         await websocket.send_text(json.dumps({"type": "tool_end", "tool_name": event["tool_name"]}))
 
                     elif event["type"] == "done":
+                        # If guardrail appended a disclaimer, send it as a final token
+                        disclaimer = event.get("disclaimer", "")
+                        if disclaimer:
+                            await websocket.send_text(json.dumps({"type": "token", "content": disclaimer}))
                         await websocket.send_text(json.dumps({"type": "done"}))
 
                     elif event["type"] == "error":

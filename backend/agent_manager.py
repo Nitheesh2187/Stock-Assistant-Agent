@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 
+from groq import APIError
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain.memory import ConversationBufferMemory
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
 from backend.services.chat_service import add_message, get_conversation_history
+from backend.tool_utils import wrap_tool, friendly_error, check_guardrail
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +71,8 @@ class AgentManager:
             except Exception:
                 logger.exception(f"Failed to connect to MCP server '{server_name}'")
 
-        self.tools = [t for t in all_tools if t.name in settings.REQUIRED_TOOLS]
+        filtered = [t for t in all_tools if t.name in settings.REQUIRED_TOOLS]
+        self.tools = [wrap_tool(t) for t in filtered]
         self._tool_map = {t.name: t for t in self.tools}
 
         logger.info(f"AgentManager ready. Tools: {list(self._tool_map.keys())}")
@@ -170,59 +173,124 @@ class AgentManager:
         """Stream a chat response for a given session + symbol.
 
         Handles history reads and message persistence internally.
-
-        Args:
-            db: Async database session.
-            session_id: The user's session ID.
-            symbol: Stock ticker symbol (e.g. "RELIANCE.NS").
-            user_message: The user's input text.
+        On failure, yields a user-friendly error message instead of raw exceptions.
 
         Yields:
-            Dicts with type: token | tool_start | tool_end | done | error
+            Dicts with type: token | tool_start | tool_end | retry | done | error
         """
         self._evict_stale_executors()
 
         stock_name = symbol.split(".")[0] if "." in symbol else symbol
 
-        # Get or create the cached entry (includes the lock)
         cached = await self._get_or_create_executor(db, session_id, symbol, stock_name)
 
         async with cached.lock:
             try:
-                # Save user message to DB
                 await add_message(db, session_id, symbol, "user", user_message)
 
                 executor = cached.executor
                 memory = cached.memory
 
                 full_response = ""
-                async for event in executor.astream_events(
-                    {"input": user_message, "chat_history": memory.chat_memory.messages},
-                    version="v2",
-                ):
-                    kind = event["event"]
+                agent_input = user_message
+                max_retries = settings.MAX_STREAM_RETRIES
+                stream_start = time.monotonic()
 
-                    if kind == "on_chat_model_stream":
-                        chunk = event["data"]["chunk"]
-                        if hasattr(chunk, "content") and chunk.content:
-                            full_response += chunk.content
-                            yield {"type": "token", "content": chunk.content}
+                logger.info(
+                    f"[STREAM:{symbol}] Starting for session={session_id}, "
+                    f"max_retries={max_retries}"
+                )
 
-                    elif kind == "on_tool_start":
-                        yield {"type": "tool_start", "tool_name": event.get("name", "")}
+                for attempt in range(1, max_retries + 1):
+                    full_response = ""
+                    attempt_start = time.monotonic()
 
-                    elif kind == "on_tool_end":
-                        yield {"type": "tool_end", "tool_name": event.get("name", "")}
+                    if attempt > 1:
+                        logger.info(
+                            f"[STREAM:{symbol}] Self-heal attempt {attempt}/{max_retries}"
+                        )
 
-                # Save assistant response to DB
+                    try:
+                        async for event in executor.astream_events(
+                            {"input": agent_input, "chat_history": memory.chat_memory.messages},
+                            version="v2",
+                        ):
+                            kind = event["event"]
+
+                            if kind == "on_chat_model_stream":
+                                chunk = event["data"]["chunk"]
+                                if hasattr(chunk, "content") and chunk.content:
+                                    full_response += chunk.content
+                                    yield {"type": "token", "content": chunk.content}
+
+                            elif kind == "on_tool_start":
+                                logger.info(f"[STREAM:{symbol}] Tool started: {event.get('name', '')}")
+                                yield {"type": "tool_start", "tool_name": event.get("name", "")}
+
+                            elif kind == "on_tool_end":
+                                logger.info(f"[STREAM:{symbol}] Tool ended: {event.get('name', '')}")
+                                yield {"type": "tool_end", "tool_name": event.get("name", "")}
+
+                        # Stream completed successfully
+                        elapsed = time.monotonic() - stream_start
+                        logger.info(
+                            f"[STREAM:{symbol}] SUCCESS — "
+                            f"attempt {attempt}/{max_retries}, "
+                            f"total time {elapsed:.2f}s, "
+                            f"response length {len(full_response)} chars"
+                        )
+                        break
+
+                    except Exception as e:
+                        attempt_elapsed = time.monotonic() - attempt_start
+                        is_retryable = (
+                            isinstance(e, APIError) and "tool call validation" in str(e)
+                        )
+
+                        if is_retryable and attempt < max_retries:
+                            logger.warning(
+                                f"[STREAM:{symbol}] RETRYABLE ERROR on attempt "
+                                f"{attempt}/{max_retries} after {attempt_elapsed:.2f}s — "
+                                f"{type(e).__name__}: {e}"
+                            )
+                            agent_input = (
+                                f"Your previous attempt failed with this error: {e}\n"
+                                f"Please try again with the original request: {user_message}\n"
+                                f"Make sure to use correct parameter types for tool calls "
+                                f"(booleans should be true/false, not strings)."
+                            )
+                            yield {"type": "retry", "attempt": attempt, "error": str(e)}
+                            continue
+
+                        logger.error(
+                            f"[STREAM:{symbol}] NON-RETRYABLE ERROR on attempt "
+                            f"{attempt}/{max_retries} after {attempt_elapsed:.2f}s — "
+                            f"{type(e).__name__}: {e}"
+                        )
+                        raise
+
+                # Guardrail: check for trading advice, append disclaimer if flagged
+                disclaimer = ""
                 if full_response:
+                    checked = check_guardrail(full_response)
+                    if checked != full_response:
+                        # Guardrail appended a disclaimer
+                        disclaimer = checked[len(full_response):]
+                        full_response = checked
                     await add_message(db, session_id, symbol, "assistant", full_response)
 
-                yield {"type": "done", "full_response": full_response}
+                yield {"type": "done", "full_response": full_response, "disclaimer": disclaimer}
 
             except Exception as e:
-                logger.exception("Error in chat_stream")
-                yield {"type": "error", "content": str(e)}
+                total_elapsed = time.monotonic() - stream_start if 'stream_start' in dir() else 0
+                logger.error(
+                    f"[STREAM:{symbol}] FINAL FAILURE for session={session_id} "
+                    f"after {total_elapsed:.2f}s — {type(e).__name__}: {e}",
+                    exc_info=True,
+                )
+                friendly = friendly_error(e)
+                await add_message(db, session_id, symbol, "assistant", friendly)
+                yield {"type": "error", "content": friendly}
 
     def remove_executor(self, session_id: str, symbol: str) -> None:
         """Remove cached executor (and its lock) for a conversation."""

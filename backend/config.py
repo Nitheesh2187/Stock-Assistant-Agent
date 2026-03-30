@@ -22,6 +22,21 @@ class Settings(BaseSettings):
     # Agent
     AGENT_MAX_ITERATIONS: int = 5
     EXECUTOR_TTL_SECONDS: int = 30 * 60  # 30 minutes
+    MAX_STREAM_RETRIES: int = 2
+    TOOL_CALL_RETRIES: int = 3
+    TOOL_CALL_TIMEOUT: int = 30  # seconds
+
+    # Circuit breaker — disable a tool after N consecutive failures
+    CIRCUIT_BREAKER_THRESHOLD: int = 5   # failures before tripping
+    CIRCUIT_BREAKER_COOLDOWN: int = 300  # seconds before re-enabling (5 min)
+
+    # Tool cache TTLs (seconds) — per tool. Unspecified tools are not cached.
+    TOOL_CACHE_TTL: dict[str, int] = {
+        "get_stock_quote": 60,          # 1 min — prices change frequently
+        "get_stock_fundamentals": 600,  # 10 min — changes quarterly
+        "get_stock_news": 900,          # 15 min — headlines don't update per minute
+        "firecrawl_scrape": 1800,       # 30 min — web pages rarely change
+    }
 
     SYSTEM_PROMPT: str = (
         "You are analyzing {symbol} ({stock_name}).\n"
@@ -33,9 +48,24 @@ class Settings(BaseSettings):
         "- Latest stock news and market developments\n"
         "- Comprehensive stock analysis\n"
         "- Web scraping for additional research\n\n"
-        "You provide information for educational and research purposes only.\n"
-        "Never recommend buying, selling, or holding any specific stock.\n"
+        "STRICT RULES — you must follow these at all times:\n"
+        "1. NEVER recommend buying, selling, or holding any stock.\n"
+        "2. NEVER say phrases like 'you should invest', 'I recommend', 'strong buy', "
+        "'consider purchasing', 'it is a good time to buy/sell'.\n"
+        "3. NEVER provide target prices, price predictions, or portfolio allocation advice.\n"
+        "4. If the user asks for trading advice, politely decline and explain that you "
+        "only provide data and analysis for educational purposes.\n"
+        "5. You may present data, metrics, ratios, and factual analysis — let the user "
+        "draw their own conclusions.\n"
+        "6. Always include this context: 'This information is for educational and research "
+        "purposes only. It is not financial advice.'\n\n"
         "Always present data clearly and explain your reasoning."
+    )
+
+    GUARDRAIL_DISCLAIMER: str = (
+        "\n\n---\n*This information is for educational and research purposes only. "
+        "It does not constitute financial advice. Always consult a qualified financial "
+        "advisor before making investment decisions.*"
     )
 
     REQUIRED_TOOLS: set[str] = {
